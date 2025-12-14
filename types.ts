@@ -39,3 +39,8 @@ export interface GeneratedContent {
   department?: string;
   additionalContext?: string;
 }
+
+export interface PlagiarismResult {
+  score: number;
+  analysis: string;
+}

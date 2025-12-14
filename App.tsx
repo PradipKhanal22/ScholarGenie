@@ -20,14 +20,18 @@ import {
   History,
   Trash2,
   Calendar,
-  ArrowRight
+  ArrowRight,
+  ShieldCheck,
+  AlertTriangle,
+  CheckCircle,
+  XCircle
 } from 'lucide-react';
 import JSZip from 'jszip';
 import { jsPDF } from "jspdf";
 import html2canvas from "html2canvas";
 import Prism from 'prismjs';
-import { Department, OutputType, ProjectRequest, GeneratedContent } from './types';
-import { generateAcademicContent } from './services/geminiService';
+import { Department, OutputType, ProjectRequest, GeneratedContent, PlagiarismResult } from './types';
+import { generateAcademicContent, checkPlagiarism } from './services/geminiService';
 
 // -- Syntax Highlighting Setup --
 // Define Python grammar manually to ensure availability without external component loading risks
@@ -349,6 +353,11 @@ const App: React.FC = () => {
   const [isFullScreen, setIsFullScreen] = useState(false);
   const [isPdfGenerating, setIsPdfGenerating] = useState(false);
   
+  // Plagiarism State
+  const [checkingPlagiarism, setCheckingPlagiarism] = useState(false);
+  const [plagiarismResult, setPlagiarismResult] = useState<PlagiarismResult | null>(null);
+  const [showPlagiarismModal, setShowPlagiarismModal] = useState(false);
+
   // History State
   const [history, setHistory] = useState<GeneratedContent[]>(() => {
     try {
@@ -411,6 +420,15 @@ const App: React.FC = () => {
     setHistory(prev => [newContent, ...prev]);
 
     setLoading(false);
+  };
+
+  const handleCheckPlagiarism = async () => {
+    if (!result) return;
+    setCheckingPlagiarism(true);
+    const data = await checkPlagiarism(result.content);
+    setPlagiarismResult(data);
+    setShowPlagiarismModal(true);
+    setCheckingPlagiarism(false);
   };
 
   const handleDeleteHistory = (e: React.MouseEvent, id: string) => {
@@ -645,6 +663,64 @@ const App: React.FC = () => {
           onClick={() => setMobileMenuOpen(false)}
           aria-hidden="true"
         />
+      )}
+
+      {/* Plagiarism Check Modal */}
+      {showPlagiarismModal && plagiarismResult && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowPlagiarismModal(false)} />
+          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full relative z-10 overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-200">
+            
+            <div className={`p-6 text-white flex justify-between items-start ${plagiarismResult.score < 25 ? 'bg-gradient-to-br from-green-500 to-emerald-600' : plagiarismResult.score < 50 ? 'bg-gradient-to-br from-yellow-400 to-orange-500' : 'bg-gradient-to-br from-red-500 to-pink-600'}`}>
+              <div>
+                <h3 className="text-xl font-bold flex items-center gap-2">
+                  <ShieldCheck className="w-6 h-6" />
+                  Originality Report
+                </h3>
+                <p className="text-white/80 text-sm mt-1">AI-Estimated Similarity Assessment</p>
+              </div>
+              <button onClick={() => setShowPlagiarismModal(false)} className="text-white/80 hover:text-white p-1 bg-black/10 hover:bg-black/20 rounded-full transition">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-8 flex flex-col items-center">
+              {/* Score Indicator */}
+              <div className="relative mb-6">
+                <svg className="w-40 h-40 transform -rotate-90">
+                  <circle cx="80" cy="80" r="70" stroke="currentColor" strokeWidth="12" fill="transparent" className="text-slate-100" />
+                  <circle 
+                    cx="80" cy="80" r="70" 
+                    stroke="currentColor" strokeWidth="12" 
+                    fill="transparent" 
+                    strokeDasharray={440} 
+                    strokeDashoffset={440 - (440 * plagiarismResult.score) / 100} 
+                    className={`transition-all duration-1000 ease-out ${plagiarismResult.score < 25 ? 'text-green-500' : plagiarismResult.score < 50 ? 'text-yellow-500' : 'text-red-500'}`} 
+                  />
+                </svg>
+                <div className="absolute inset-0 flex flex-col items-center justify-center">
+                   <span className="text-4xl font-bold text-slate-800">{plagiarismResult.score}%</span>
+                   <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Similarity</span>
+                </div>
+              </div>
+
+              {/* Status Badge */}
+              <div className={`mb-6 px-4 py-1.5 rounded-full text-sm font-bold flex items-center gap-2 ${plagiarismResult.score < 25 ? 'bg-green-100 text-green-700' : plagiarismResult.score < 50 ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-700'}`}>
+                {plagiarismResult.score < 25 ? <CheckCircle className="w-4 h-4" /> : plagiarismResult.score < 50 ? <AlertTriangle className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
+                {plagiarismResult.score < 25 ? 'Highly Original' : plagiarismResult.score < 50 ? 'Moderately Original' : 'Significant Overlap Likely'}
+              </div>
+
+              <div className="bg-slate-50 rounded-lg p-5 w-full border border-slate-100">
+                <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Detailed Analysis</h4>
+                <p className="text-slate-700 text-sm leading-relaxed">{plagiarismResult.analysis}</p>
+              </div>
+
+              <div className="mt-6 text-xs text-center text-slate-400 max-w-xs">
+                * This score is an AI estimation based on common phrasing patterns and does not guarantee results from paid plagiarism databases like Turnitin.
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Sidebar - Hidden in Full Screen Mode */}
@@ -917,6 +993,24 @@ const App: React.FC = () => {
                               aria-label="Copy content to clipboard"
                             >
                               Copy
+                            </button>
+
+                            {/* Plagiarism Check Button */}
+                            <button
+                               onClick={handleCheckPlagiarism}
+                               disabled={checkingPlagiarism}
+                               className={`flex items-center text-xs font-medium bg-white border border-slate-200 px-3 py-1.5 rounded-md transition focus:outline-none focus:ring-2 focus:ring-slate-500 ${
+                                 checkingPlagiarism ? 'text-slate-400 cursor-not-allowed' : 'text-slate-600 hover:text-indigo-600 hover:bg-indigo-50'
+                               }`}
+                               aria-label="Check Originality"
+                               title="Scan text for originality"
+                            >
+                               {checkingPlagiarism ? (
+                                 <span className="w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin mr-1.5"></span>
+                               ) : (
+                                 <ShieldCheck className="w-3.5 h-3.5 mr-1.5" />
+                               )}
+                               Scan
                             </button>
                             
                             {(activeTab === OutputType.CODE || activeTab === OutputType.SLIDES) && (
