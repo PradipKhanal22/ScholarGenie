@@ -38,9 +38,11 @@ export interface GeneratedContent {
   topic?: string;
   department?: string;
   additionalContext?: string;
+  plagiarismResult?: PlagiarismResult;
 }
 
 export interface PlagiarismResult {
   score: number;
   analysis: string;
+  flaggedSources?: { title: string; url?: string; matchLevel: 'High' | 'Medium' | 'Low' }[];
 }

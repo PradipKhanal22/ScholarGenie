@@ -1,9 +1,11 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 import { Department, OutputType, ProjectRequest, PlagiarismResult } from "../types";
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-const MODEL_FAST = 'gemini-2.5-flash';
+// Using recommended model names based on task complexity
+const MODEL_FAST = 'gemini-3-flash-preview';
 const MODEL_SMART = 'gemini-3-pro-preview'; 
 
 export const generateAcademicContent = async (request: ProjectRequest): Promise<string> => {
@@ -125,7 +127,7 @@ export const generateAcademicContent = async (request: ProjectRequest): Promise<
       break;
   }
 
-  // Use smart model for complex tasks
+  // Use smart model for complex reasoning tasks
   const isComplexTask = [OutputType.CODE, OutputType.REPORT, OutputType.DOCS, OutputType.ALL, OutputType.SLIDES].includes(outputType);
   const selectedModel = isComplexTask ? MODEL_SMART : MODEL_FAST;
 
@@ -146,21 +148,29 @@ export const generateAcademicContent = async (request: ProjectRequest): Promise<
   }
 };
 
-export const checkPlagiarism = async (text: string): Promise<PlagiarismResult> => {
-  // Truncate text if needed to stay within limits, though Gemini 2.5 Flash has a large context.
-  // We'll take the first 15000 chars to be safe and fast.
+export const checkPlagiarism = async (text: string, comparisonContext?: string): Promise<PlagiarismResult> => {
   const contentToAnalyze = text.length > 15000 ? text.slice(0, 15000) + "..." : text;
+  
+  const referencePrompt = comparisonContext 
+    ? `The user has provided the following reference materials/URLs for specific cross-referencing:
+       ---
+       ${comparisonContext}
+       ---
+       Strictly prioritize checking against these specific materials in addition to general knowledge.`
+    : "";
 
-  const prompt = `Analyze the following academic text for originality and uniqueness.
-  Estimate a "similarity score" (0 to 100) representing the likelihood of this content overlapping with common internet sources or generic academic phrasing (0% = Highly Unique, 100% = Highly Generic/Plagiarized).
-  Provide a brief analysis explaining the score.
+  const prompt = `Analyze the following academic text for originality and uniqueness. 
+  ${referencePrompt}
+
+  Estimate a "similarity score" (0 to 100) representing the likelihood of this content overlapping with internet sources, documentation, or common academic phrasing. 
+  Provide a detailed analysis explaining the score and list up to 3 potential flagged sources if any.
 
   Text to analyze:
   "${contentToAnalyze}"`;
 
   try {
     const response = await ai.models.generateContent({
-      model: MODEL_FAST, // Flash is good for analysis
+      model: MODEL_FAST,
       contents: prompt,
       config: {
         responseMimeType: "application/json",
@@ -168,7 +178,19 @@ export const checkPlagiarism = async (text: string): Promise<PlagiarismResult> =
           type: Type.OBJECT,
           properties: {
             score: { type: Type.NUMBER, description: "Similarity percentage (0-100)" },
-            analysis: { type: Type.STRING, description: "Brief explanation of the score" }
+            analysis: { type: Type.STRING, description: "Detailed explanation of the findings" },
+            flaggedSources: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  title: { type: Type.STRING },
+                  url: { type: Type.STRING },
+                  matchLevel: { type: Type.STRING, enum: ["High", "Medium", "Low"] }
+                },
+                required: ["title", "matchLevel"]
+              }
+            }
           },
           required: ["score", "analysis"]
         }
